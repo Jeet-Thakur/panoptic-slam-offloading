@@ -14,6 +14,7 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <vector>
+#include <string>
 
 namespace ORB_SLAM3
 {
@@ -34,7 +35,7 @@ namespace ORB_SLAM3
 
     struct Panoptic_image
     {
-        unsigned int id;
+        int id;
         cv::Mat image;
         cv::Mat union_instance_mask;
         cv::Mat all_masks;

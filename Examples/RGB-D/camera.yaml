@@ -1,0 +1,71 @@
+%YAML:1.0
+
+#--------------------------------------------------------------------------------------------
+# Camera Parameters
+#--------------------------------------------------------------------------------------------
+File.version: "1.0"
+
+Camera.type: "PinHole"
+
+# ---- Intrinsics ----
+Camera1.fx: 715.0
+Camera1.fy: 715.0
+Camera1.cx: 640.0
+Camera1.cy: 360.0
+
+# ---- Distortion ----
+Camera1.k1: -0.05
+Camera1.k2: 0.02
+Camera1.p1: 0.0
+Camera1.p2: 0.0
+
+# ---- Resolution ----
+Camera.width: 1280
+Camera.height: 720
+
+# ---- FPS ----
+Camera.fps: 30
+
+# ---- Color format ----
+Camera.RGB: 1
+
+#--------------------------------------------------------------------------------------------
+# RGB-D Parameters
+#--------------------------------------------------------------------------------------------
+
+# Threshold close/far points (keep default)
+Stereo.ThDepth: 40.0
+
+# Baseline × fx (unused for RGB-D but required)
+Stereo.b: 0.0
+
+# Depth map scale
+# IMPORTANT: if your depth images are black PNGs with uint16 = 0,
+# this value is irrelevant but MUST exist
+RGBD.DepthMapFactor: 5000.0
+
+#--------------------------------------------------------------------------------------------
+# ORB Parameters
+#--------------------------------------------------------------------------------------------
+
+ORBextractor.nFeatures: 1500
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 20
+ORBextractor.minThFAST: 7
+
+#--------------------------------------------------------------------------------------------
+# Viewer Parameters
+#--------------------------------------------------------------------------------------------
+
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1.0
+Viewer.GraphLineWidth: 1.0
+Viewer.PointSize: 2.0
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3.0
+Viewer.ViewpointX: 0.0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500.0
+

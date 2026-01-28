@@ -80,6 +80,10 @@ private:
     enum Element {id_elem,isThing_elem,score_elem,category_elem,instance_elem,area_elem,mask_elem,bbox_elem};
 
     Panoptic_image CurrentPanopticImg;
+    // --- Socket IPC (STEP 1: unused) ---
+    // int mSockFd = -1;
+    // bool mSocketConnected = false;
+    // bool InitSocket();
 
 
 public:
@@ -112,8 +116,11 @@ public:
     Panoptic_image GetPanoptic(cv::Mat &image);
     Panoptic_image GetResults();
     void ShortTerm_DA(std::vector<Panoptic_Object> &objs, std::vector<Panoptic_Object> &last_objs);
+    // IPC helpers
+    bool ResultExists(int frame_id);
+    Panoptic_image ReadResultFromJSON(int frame_id);
+    Panoptic_image EmptyPanopticResult(int frame_id);
 
-    
 };
 
 

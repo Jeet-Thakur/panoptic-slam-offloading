@@ -22,11 +22,19 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
 
 // C PYTHON API REFERENCES
 //http://books.gigatux.nl/mirror/pythonprogramming/0596000855_python2-CHP-20-SECT-5.html
 //https://gist.github.com/Xonxt/26d2a9ac6c56505d0896822ede99a646?permalink_comment_id=3619671
 //https://edcjones.tripod.com/refcount.html  Py_INCREF & Py_DECREF
+
+static const std::string PANOPTIC_IPC_DIR = "/mnt/hgfs/panoptic_ipc";
+static constexpr int MAX_WAIT_MS = 10;   // hard upper bound
+static constexpr int WAIT_STEP_US = 1000; // 1 ms
+
 
 void signal_callback_handler(int signum) {
    cout << "Terminate program \n";// << signum << endl;
@@ -36,12 +44,108 @@ void signal_callback_handler(int signum) {
 
 namespace ORB_SLAM3
 {
+
+bool PanopticNet::ResultExists(int frame_id)
+{
+    std::stringstream ss;
+    ss << PANOPTIC_IPC_DIR << "/" << frame_id << ".json";
+    return std::experimental::filesystem::exists(ss.str());
+}
+
+Panoptic_image PanopticNet::ReadResultFromJSON(int frame_id)
+{
+    Panoptic_image result;
+    result.id = frame_id;
+
+    std::stringstream ss;
+    ss << PANOPTIC_IPC_DIR << "/" << frame_id << ".json";
+
+    std::ifstream f(ss.str());
+    if (!f.is_open())
+    {
+        std::cerr << "[PanopticNet] Failed to open JSON for frame "
+                  << frame_id << std::endl;
+        return EmptyPanopticResult(frame_id);
+    }
+
+    json j;
+    f >> j;
+
+    const int w = j["width"];
+    const int h = j["height"];
+
+    // ---------- OBJECTS ----------
+    for (const auto &obj : j["objects"])
+    {
+        Panoptic_Object po;
+
+        po.id = -1;
+        po.isThing = obj["isThing"].get<int>();
+        po.category_id = obj["category_id"].get<int>();
+        po.score = obj["score"].get<float>();
+        po.tracking_id = -1;
+        po.isNewObj = true;
+
+        // MASK (H×W×3)
+        std::vector<uint8_t> mask_bytes =
+            obj["mask"].get<std::vector<uint8_t>>();
+
+        po.mask = cv::Mat(h, w, CV_8UC3, mask_bytes.data()).clone();
+
+        // BBOX
+        auto b = obj["bbox"];
+        po.bbox = cv::Rect(
+            b[0].get<int>(),
+            b[1].get<int>(),
+            b[2].get<int>(),
+            b[3].get<int>()
+        );
+
+        po.area = static_cast<float>(cv::countNonZero(po.mask.reshape(1)));
+
+        result.objs.push_back(po);
+    }
+
+    // ---------- UNION MASK ----------
+    if (j.contains("union_mask"))
+    {
+        std::vector<uint8_t> u =
+            j["union_mask"].get<std::vector<uint8_t>>();
+
+        result.union_instance_mask =
+            cv::Mat(h, w, CV_8UC3, u.data()).clone();
+    }
+    else
+    {
+        result.union_instance_mask =
+            cv::Mat::zeros(h, w, CV_8UC3);
+    }
+
+    // ---------- ALL MASKS ----------
+    if (j.contains("all_masks"))
+    {
+        std::vector<uint8_t> a =
+            j["all_masks"].get<std::vector<uint8_t>>();
+
+        result.all_masks =
+            cv::Mat(h, w, CV_8UC3, a.data()).clone();
+    }
+    else
+    {
+        result.all_masks =
+            cv::Mat::zeros(h, w, CV_8UC3);
+    }
+
+    return result;
+}
+
+
 PanopticNet::PanopticNet(){
 
     mbNewImgFlag = false;
     mbFinishRequested = false;
 
-    std::cout << "Importing Panoptic Segmentation Settings... \n";
+/*    std::cout << "Importing Panoptic Segmentation Settings... \n";
     setup_env();
     Py_Initialize();
 
@@ -49,12 +153,12 @@ PanopticNet::PanopticNet(){
 
     std::cout<<"Python Thread support Initialized \n";    
     _import_array();
-        
+*/        
     global_id = 0;
     next_tracking_id = 0;
     width = 640;
     height = 480;
-    
+/*    
     this->py_module = PyImport_ImportModule("panoptic_python"); //config_path.c_str()
     if (!py_check(this->py_module)) // check load py_Name 
     {
@@ -112,15 +216,10 @@ PanopticNet::PanopticNet(){
         }
 
         std::cout<<"Panoptic Loaded \n";
-
-    }
-    else
-    {
-        py_error("python error: Module is not callable");
-        exit (EXIT_FAILURE);
+*/
     }
 //
-    }
+    
 
 //=========================================================
 void PanopticNet::setup_env()
@@ -439,15 +538,31 @@ cv::Rect PanopticNet::convert_bbox(cv::Rect box)
     return result;
 }
 //========================================================
-void PanopticNet::check_bbox(cv::Rect &bbox,int w, int h)
+void PanopticNet::check_bbox(cv::Rect &bbox, int w, int h)
 {
-    //std::cout<<"Input x "<< bbox.x << " y "<< bbox.y <<" width "<< bbox.width << " height " << bbox.height << "\n";
+    // Clamp origin
+    if (bbox.x < 0) bbox.x = 0;
+    if (bbox.y < 0) bbox.y = 0;
 
-    if((bbox.x + bbox.width) > w)   {bbox.width -= abs(w - bbox.x - bbox.width);}
-    if((bbox.y + bbox.height) > h) {bbox.height -= abs(h - bbox.y - bbox.height);}
+    // Clamp width / height
+    if (bbox.width <= 0)  bbox.width  = 1;
+    if (bbox.height <= 0) bbox.height = 1;
 
-    //std::cout<<"Input x"<< bbox.x << " y "<< bbox.y <<" width "<< bbox.width << " height " << bbox.height << "\n";
+    // Clamp right/bottom
+    if (bbox.x >= w) bbox.x = w - 1;
+    if (bbox.y >= h) bbox.y = h - 1;
+
+    if (bbox.x + bbox.width > w)
+        bbox.width = w - bbox.x;
+
+    if (bbox.y + bbox.height > h)
+        bbox.height = h - bbox.y;
+
+    // Final guard (absolute safety)
+    if (bbox.width <= 0)  bbox.width  = 1;
+    if (bbox.height <= 0) bbox.height = 1;
 }
+
 //=========================================================
 float PanopticNet::mask_iou(Panoptic_Object obj1, Panoptic_Object obj2)
 {
@@ -577,6 +692,7 @@ void PanopticNet::ShortTerm_DA(std::vector<Panoptic_Object> &objs, std::vector<P
 }
 //=========================================================
 PanopticNet::~PanopticNet(){
+/*
     delete this->py_module;
     delete this->py_class;
     delete this->py_instance;
@@ -586,6 +702,7 @@ PanopticNet::~PanopticNet(){
     delete this->py_get_all_masks;
 
     Py_Finalize();
+*/
 }
 
 bool PanopticNet::isFinished()
@@ -598,7 +715,7 @@ void PanopticNet::RequestFinish()
 {
     unique_lock<mutex> lock(mMutexFinish);
     mbFinishRequested=true;
-    Py_Finalize();
+    // Py_Finalize();
 }
 
 void PanopticNet::SetTracker(Tracking *pTracker)
@@ -608,46 +725,56 @@ void PanopticNet::SetTracker(Tracking *pTracker)
 
 void PanopticNet::Run()
 {
-    PyEval_SaveThread();
-    PyGILState_STATE gstate;
-    gstate = PyGILState_Ensure();
     signal(SIGINT, signal_callback_handler);
+
     while(1)
-    {		
-	
-        usleep(1);
-        if(!isNewImgArrived()){
-		continue;
-	}
-	
-
-	
-    Detect();
-    
-
-	if(isFinished())
     {
-        PyGILState_Release(gstate);
-        break;
-    }
+        usleep(1000); // 1 ms, not 1 microsecond
 
-	
-    }
+        if(!isNewImgArrived())
+            continue;
 
+        Detect();
+
+        if(isFinished())
+            break;
+    }
 }
 
-void PanopticNet::Detect(){
+void PanopticNet::Detect()
+{
+    int frame_id = mpTracker->mCurrentFrame.mnId;;
 
+    int waited_ms = 0;
+    const int MAX_WAIT_MS = 10;
+    const int WAIT_STEP_US = 1000; // 1 ms
 
-    
-    CurrentPanopticImg = GetPanoptic();
-    
+    while (!ResultExists(frame_id) && waited_ms < MAX_WAIT_MS)
+    {
+        usleep(WAIT_STEP_US);
+        waited_ms++;
+    }
+
+    if (ResultExists(frame_id))
+    {
+        CurrentPanopticImg = ReadResultFromJSON(frame_id);
+        std::cout << "[PanopticNet] Loaded JSON for frame "
+                  << frame_id << std::endl;
+    }
+    else
+    {
+        std::cout << "[PanopticNet] No panoptic result for frame "
+                  << frame_id << " (proceeding without it)" << std::endl;
+
+        CurrentPanopticImg = EmptyPanopticResult(frame_id);
+    }
+
     pImg = CurrentPanopticImg.image;
     unkImg = CurrentPanopticImg.all_masks;
 
-    SetDetectionFlag();		
-    
+    SetDetectionFlag();
 }
+
 
 bool PanopticNet::isNewImgArrived()
 {
@@ -674,6 +801,20 @@ Panoptic_image PanopticNet::GetResults(){
 
     return CurrentPanopticImg;
 }
+
+Panoptic_image PanopticNet::EmptyPanopticResult(int frame_id)
+{
+    Panoptic_image res;
+    res.id = frame_id;
+
+    res.image = cv::Mat::zeros(height, width, CV_8UC3);
+    res.union_instance_mask = cv::Mat::zeros(height, width, CV_8UC3);
+    res.all_masks = cv::Mat::zeros(height, width, CV_8UC3);
+
+    res.objs.clear();
+    return res;
+}
+
 
 
 }

@@ -148,6 +148,7 @@ ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
 #/usr/lib/x86_64-linux-gnu/libpython3.6m.so
 -lboost_serialization
 -lcrypto
+stdc++fs
 )
 
 # If RealSense SDK is found the library is added and its examples compiled
